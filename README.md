@@ -5,6 +5,9 @@ Debird deobfuscates a variety of binaries including `CLIPSP.SYS` and `SPSYS.SYS`
 > Debird is currently in alpha. That means support is experimental and issues are abound.
 > Additionally, Debird requires manual source code tweaking to use.
 
+## What happened to Declipt?
+The scope of Declipt, previously pertaining solely to `CLIPSP.SYS`, was too narrow, so Debird was born.
+
 ## Special Thanks
 …to [WitherOrNot](https://github.com/WitherOrNot) for researching and cracking [Warbird](https://github.com/WitherOrNot/warbird-docs/tree/main).
 
