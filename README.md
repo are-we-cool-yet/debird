@@ -18,4 +18,5 @@ To use Debird, clone the Git repository, create a folder called `emu64` in the p
 ## Specialized Support for Miscellaneous Drivers
 Debird also offers support for deobfuscating other drivers. In particular, the following are supported:
 - `SPSYS.SYS`
+-
 It is up to the user to ensure that the driver is in the correct state and is correctly patched to be emulated.
