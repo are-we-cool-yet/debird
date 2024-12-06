@@ -1,4 +1,4 @@
-use std::{cell::RefCell, ffi, ops::Deref, path::Path, sync::{mpsc, LazyLock}, thread::{self}, time::Duration};
+use std::{cell::RefCell, ffi, ops::Deref, path::{Path, PathBuf}, sync::{mpsc, LazyLock}, thread::{self}, time::Duration};
 use error::Error;
 use minhook::MinHook;
 use pretty_hex::config_hex;
@@ -23,30 +23,31 @@ pub static DECRYPT_TX: LazyLock<mpsc::SyncSender<types::DecryptMessage>> = LazyL
 });
 
 fn main() -> Result<(), Error> {
+    let args = std::env::args().collect::<Vec<String>>();
+    if args.len() != 1 {
+        println!("Usage:\n\
+debird <path-to-driver>");
+    }
+
     // SAFETY: It is assumed that the library is safe to load and that the platform supports calling functions via DLL offset.
     // It also assumes that Microsoft hasn't changed anything. If these conditions aren't met, god help you.
 
-    let mut lib_path = std::fs::canonicalize(
-        if Path::new(constants::CLIPSP).exists() {
-            constants::CLIPSP
-        } else if Path::new(constants::DEBUG_CLIPSP).exists() {
-            constants::DEBUG_CLIPSP
-        } else if Path::new(constants::DEBUG2_CLIPSP).exists() {
-            constants::DEBUG2_CLIPSP
+    let lib_path = std::fs::canonicalize(
+        if Path::new(&args[0]).exists() {
+            &args[0]
         } else {
             println!("Current Directory: {}", std::env::current_dir()?.display());
-            panic!("emu64 not found! Read the directions in README.md.");
+            panic!("{} not found! Read the directions in README.md.", &args[0]);
         }
     )?;
-    let mut data_dir = lib_path.clone();
+    let mut data_dir = PathBuf::from(lib_path.ancestors().next().expect("path should not be in root folder (path should have ancestor folder)"));
     data_dir.push("data");
     if !data_dir.try_exists()? {
         std::fs::create_dir(data_dir.clone())?;
     }
-    lib_path.push("ClipSp.sys");
 
     unsafe {
-        println!("Loading ClipSp.sys");
+        println!("Loading {}", lib_path.file_name().expect("file name should be valid").to_string_lossy().to_string());
         let lib = libloading::os::windows::Library::load_with_flags(&lib_path, libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)?;
         let handle = lib.into_raw();
 
