@@ -6,6 +6,11 @@ const fn from_base(addr: usize) -> usize {
     addr - constants::DLL_BASE
 }
 
+/// # Safety
+/// The caller assumes the responsibility that offsetting the
+/// given pointer by the given offset is not used to break aliasing
+/// rules or other borrowing rules and that the resulting address is valid
+/// and can be cast to the specified type.
 pub const unsafe fn offset_addr<T>(ptr: usize, offset: isize) -> *mut T {
     (from_base(ptr) as *mut T).byte_offset(offset)
 }
