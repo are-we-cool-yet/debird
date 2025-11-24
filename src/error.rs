@@ -1,5 +1,7 @@
 use std::{fmt::Display, sync::mpsc::RecvError};
 
+use pelite::pattern::{ParsePatError, Pattern};
+
 #[derive(thiserror::Error, Debug)]
 pub struct DriverError(pub String);
 
@@ -32,11 +34,21 @@ pub enum Error {
     UnsupportedDriver(#[from] DriverError),
     #[error("Error in PeLite: {0}")]
     PeLiteError(#[from] pelite::Error),
+    #[error("Patch not found at address: {0:?}")]
+    PatchNotFound(Pattern),
+    #[error("Error while parsing patch pattern: {0}")]
+    PatternParseError(#[from] ParsePatError),
 }
 
 impl From<minhook::MH_STATUS> for Error {
     fn from(value: minhook::MH_STATUS) -> Self {
         Self::MhStatus(value)
+    }
+}
+
+impl From<Pattern> for Error {
+    fn from(value: Pattern) -> Self {
+        Self::PatchNotFound(value)
     }
 }
 
