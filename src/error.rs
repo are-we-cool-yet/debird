@@ -1,4 +1,20 @@
-use std::sync::mpsc::RecvError;
+use std::{fmt::Display, sync::mpsc::RecvError};
+
+#[derive(thiserror::Error, Debug)]
+pub struct DriverError(pub String);
+
+impl From<String> for DriverError {
+    fn from(value: String) -> Self {
+        Self(value)
+    }
+}
+
+impl Display for DriverError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)?;
+        Ok(())
+    }
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
@@ -12,6 +28,10 @@ pub enum Error {
     PdbError(#[from] pdb::Error),
     #[error("Error receiving message from thread: {0}")]
     RecvError(#[from] RecvError),
+    #[error("Unsupported driver: {0}")]
+    UnsupportedDriver(#[from] DriverError),
+    #[error("Error in PeLite: {0}")]
+    PeLiteError(#[from] pelite::Error),
 }
 
 impl From<minhook::MH_STATUS> for Error {
@@ -19,3 +39,5 @@ impl From<minhook::MH_STATUS> for Error {
         Self::MhStatus(value)
     }
 }
+
+pub type Result<T> = core::result::Result<T, Error>;

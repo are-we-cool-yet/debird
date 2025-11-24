@@ -19,8 +19,8 @@ thread_local! {
 /// mov eax, 1
 /// ret
 /// ```
-#[allow(unused)]
-pub const CANCEL_DRIVER_ENTRY: &'static [u8] = &[0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3];
+pub const CANCEL_DRIVER_ENTRY: &[u8] = &[0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3];
+pub const TRUE_DRIVER_ENTRY: &[u8] = &[0xB8, 0x01, 0x00, 0x00, 0xC0, 0xC3];
 
 pub unsafe extern "fastcall" fn MmChangeImageProtection(_arg0: QWORD, _arg1: QWORD, _arg2: QWORD, _arg3: QWORD) -> winapi::ctypes::__int64 {
     println!("MmChangeImageProtection");

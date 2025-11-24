@@ -1,14 +1,20 @@
-use std::{cell::RefCell, ffi, ops::Deref, path::{Path, PathBuf}, sync::{mpsc, LazyLock}, thread::{self}, time::Duration};
+use std::{cell::RefCell, ffi, ops::Deref, path::{Path, PathBuf}, str::FromStr, sync::{LazyLock, mpsc}, thread::{self}, time::Duration};
 use error::Error;
 use minhook::MinHook;
+use pelite::FileMap;
+use pelite::pe64::*;
 use pretty_hex::config_hex;
 use util::offset_addr;
+
+use crate::target::TargetDriver;
 
 pub mod constants;
 pub mod error;
 pub mod hook;
 pub mod util;
 pub mod types;
+pub mod target;
+pub mod analyze;
 
 thread_local! {
     pub static DECRYPT_RX: RefCell<Option<mpsc::Receiver<types::DecryptMessage>>> = RefCell::new(None);
@@ -33,21 +39,37 @@ debird <path-to-driver>");
     // It also assumes that Microsoft hasn't changed anything. If these conditions aren't met, god help you.
 
     let lib_path = std::fs::canonicalize(
-        if Path::new(&args[0]).exists() {
-            &args[0]
+        if Path::new(&args[1]).exists() {
+            &args[1]
         } else {
             println!("Current Directory: {}", std::env::current_dir()?.display());
-            panic!("{} not found! Read the directions in README.md.", &args[0]);
+            panic!("{} not found! Read the directions in README.md.", &args[1]);
         }
     )?;
-    let mut data_dir = PathBuf::from(lib_path.ancestors().next().expect("path should not be in root folder (path should have ancestor folder)"));
+    let mut data_dir = PathBuf::from(lib_path.parent().unwrap().ancestors().next().expect("path should not be in root folder (path should have ancestor folder)"));
     data_dir.push("data");
     if !data_dir.try_exists()? {
+        println!("a {:?}", lib_path);
+        println!("a {:?}", data_dir);
         std::fs::create_dir(data_dir.clone())?;
     }
 
+    // Do some static analysis
+    let lib_name = lib_path.file_name().expect("file name should be valid").to_string_lossy();
+    println!("Analyzing {}", lib_name);
+    let file_map = FileMap::open(&lib_path).expect("failed to open file map");
+    let pe_file = PeFile::from_bytes(&file_map).expect("failed to open PE file, is this 64-bit?");
+    let image_base = pe_file.optional_header().ImageBase;
+    let target_driver = TargetDriver::from_str(&lib_name)?;
+    let analysis = match target_driver {
+        TargetDriver::CLIPSP => analyze::clipsp(&lib_path, pe_file)?,
+    };
+    println!("Analyzed: {analysis:?}");
+
+    // Now emulate the driver to decrypt and extract the code
+    println!("Emulating {}", lib_name);
+
     unsafe {
-        println!("Loading {}", lib_path.file_name().expect("file name should be valid").to_string_lossy().to_string());
         let lib = libloading::os::windows::Library::load_with_flags(&lib_path, libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)?;
         let handle = lib.into_raw();
 
