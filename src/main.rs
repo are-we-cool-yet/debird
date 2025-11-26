@@ -1,12 +1,14 @@
+#![feature(map_try_insert)]
+#![feature(exit_status_error)]
+
 use std::{cell::RefCell, ffi, ops::Deref, path::{Path, PathBuf}, str::FromStr, sync::{LazyLock, mpsc}, thread::{self}, time::Duration};
 use error::Error;
 use minhook::MinHook;
 use pelite::FileMap;
 use pelite::pe64::*;
 use pretty_hex::config_hex;
-use util::offset_addr;
 
-use crate::target::TargetDriver;
+use crate::{target::TargetDriver, util::{Imports, from_base}};
 
 pub mod constants;
 pub mod error;
@@ -15,6 +17,8 @@ pub mod util;
 pub mod types;
 pub mod target;
 pub mod analyze;
+pub mod patch;
+pub mod smuggle;
 
 thread_local! {
     pub static DECRYPT_RX: RefCell<Option<mpsc::Receiver<types::DecryptMessage>>> = RefCell::new(None);
@@ -59,22 +63,29 @@ debird <path-to-driver>");
     println!("Analyzing {}", lib_name);
     let file_map = FileMap::open(&lib_path).expect("failed to open file map");
     let pe_file = PeFile::from_bytes(&file_map).expect("failed to open PE file, is this 64-bit?");
-    let image_base = pe_file.optional_header().ImageBase;
+    let image_base = pe_file.optional_header().ImageBase as usize;
     let target_driver = TargetDriver::from_str(&lib_name)?;
     let analysis = match target_driver {
         TargetDriver::CLIPSP => analyze::clipsp(&lib_path, pe_file)?,
     };
     println!("Analyzed: {analysis:?}");
 
+    let imports = Imports::from_pe_file(&pe_file)?;
+    println!("Generating Fake Exports");
+    smuggle::smuggle(lib_path.parent().unwrap(), &imports)?;
+
     // Now emulate the driver to decrypt and extract the code
     println!("Emulating {}", lib_name);
 
     unsafe {
-        let lib = libloading::os::windows::Library::load_with_flags(&lib_path, libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)?;
+        println!("a");
+        println!("{:?}", &analysis.patched_path);
+        let lib = libloading::os::windows::Library::load_with_flags(&analysis.patched_path, libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)?;
+        println!("b");
         let handle = lib.into_raw();
 
         // hook ntoskrnl functions
-        create_hooks_with_handle! { handle:
+        create_hooks! { (handle, imports):
             MmChangeImageProtection;
             IoAllocateMdl;
             IoFreeMdl;
@@ -95,15 +106,15 @@ debird <path-to-driver>");
                 println!("{data_id}");
                 hook::DATA_ID.set(data_id);
                 hook::CHUNK_ID.set(0);
-                let rw_data_ptr: *mut ffi::c_void = offset_addr(rw_data, handle);
-                let const_data_ptr = offset_addr::<winapi::ctypes::__int64>(const_data, handle);
+                let rw_data_ptr = (from_base(rw_data, image_base) as *mut ffi::c_void).byte_offset(handle);
+                let const_data_ptr = (from_base(const_data, image_base) as *mut winapi::ctypes::__int64).byte_offset(handle);
                 if *((const_data_ptr.byte_offset(0x50)) as *mut winapi::shared::minwindef::DWORD) & 1 == 0 {
                     println!("Oops! Something is wrong with the Const Data provided. 0x{:X}", const_data);
                     println!("const_data + 0x50    0x{:X}", const_data_ptr.byte_offset(0x50) as usize);
                     println!("*(DWORD *)(const_data + 0x50)    0x{:X}", *(const_data_ptr.byte_offset(0x50) as *mut winapi::shared::minwindef::DWORD));
                     println!("*(DWORD *)(const_data + 0x50) & 1    0x{:X}", *(const_data_ptr.byte_offset(0x50) as *mut winapi::shared::minwindef::DWORD) & 1);
                 }
-                let decrypt_fn_ptr = offset_addr(decrypt_fn_addr, handle);
+                let decrypt_fn_ptr = (from_base(decrypt_fn_addr, image_base) as *mut ffi::c_void).byte_offset(handle);
                 let decrypt_fn = std::mem::transmute::<*mut ffi::c_void, types::WarbirdDecrypt>(decrypt_fn_ptr);
                 println!("Decrypting rw_data (0x{rw_data:X}) and const_data (0x{const_data:X}) w/ 0x{decrypt_fn_addr:X}");
                 let decrypted = decrypt_fn(const_data_ptr as _, rw_data_ptr as *mut _);

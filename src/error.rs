@@ -1,20 +1,18 @@
-use std::{fmt::Display, sync::mpsc::RecvError};
+use std::{process::ExitStatusError, str::Utf8Error, sync::mpsc::RecvError};
 
 use pelite::pattern::{ParsePatError, Pattern};
 
 #[derive(thiserror::Error, Debug)]
+#[error("{0}")]
+pub struct ImportNotFound(pub String);
+
+#[derive(thiserror::Error, Debug)]
+#[error("{0}")]
 pub struct DriverError(pub String);
 
 impl From<String> for DriverError {
     fn from(value: String) -> Self {
         Self(value)
-    }
-}
-
-impl Display for DriverError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)?;
-        Ok(())
     }
 }
 
@@ -38,6 +36,12 @@ pub enum Error {
     PatchNotFound(Pattern),
     #[error("Error while parsing patch pattern: {0}")]
     PatternParseError(#[from] ParsePatError),
+    #[error("Import required for hooking not found: {0}")]
+    HookImportNotFound(ImportNotFound),
+    #[error("Error parsing string as UTF-8: {0}")]
+    Utf8Error(#[from] Utf8Error),
+    #[error("Error from child process: {0}")]
+    ExitStatusError(#[from] ExitStatusError),
 }
 
 impl From<minhook::MH_STATUS> for Error {

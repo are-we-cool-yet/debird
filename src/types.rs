@@ -8,9 +8,9 @@ use winapi::shared::ntdef;
 pub type DecryptMessage = (Vec<u8>, usize, usize);
 
 // Function Types
-pub type WarbirdDecrypt = unsafe extern "fastcall" fn(rw_data: winapi::ctypes::__int64, const_data: *mut winapi::ctypes::c_int) -> winapi::ctypes::__int64;
+pub type WarbirdDecrypt = unsafe extern "system" fn(rw_data: winapi::ctypes::__int64, const_data: *mut winapi::ctypes::c_int) -> winapi::ctypes::__int64;
 
-// Types n Shit
+// Types n Stuff
 pub type QWORD = winapi::ctypes::c_ulonglong;
 pub type KPROCESSOR_MODE = winapi::shared::ntdef::CCHAR;
 #[repr(C)]
@@ -20,6 +20,7 @@ pub enum LOCK_OPERATION {
     IoModifyAccess = 0x2,
 }
 #[repr(C)]
+#[allow(clippy::enum_clike_unportable_variant)] // we don't support 32-bit
 pub enum MEMORY_CACHING_TYPE {
     MmNonCached = 0x0,
     MmCached = 0x1,

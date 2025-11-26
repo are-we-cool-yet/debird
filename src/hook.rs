@@ -3,6 +3,7 @@
 
 use std::{cell::RefCell, collections::VecDeque};
 
+use fn_abi::abi;
 use winapi::{shared::{minwindef, ntdef}, um::{errhandlingapi::GetLastError, memoryapi::VirtualProtectEx, processthreadsapi::GetCurrentProcess, winnt::PAGE_READWRITE}};
 
 use crate::{constants, ptr, types::{KPROCESSOR_MODE, LOCK_OPERATION, MDL, MEMORY_CACHING_TYPE, QWORD}, DECRYPT_TX};
@@ -20,15 +21,16 @@ thread_local! {
 /// ret
 /// ```
 pub const CANCEL_DRIVER_ENTRY: &[u8] = &[0xB8, 0x01, 0x00, 0x00, 0x00, 0xC3];
-pub const TRUE_DRIVER_ENTRY: &[u8] = &[0xB8, 0x01, 0x00, 0x00, 0xC0, 0xC3];
 
-pub unsafe extern "fastcall" fn MmChangeImageProtection(_arg0: QWORD, _arg1: QWORD, _arg2: QWORD, _arg3: QWORD) -> winapi::ctypes::__int64 {
+#[abi("system")]
+pub unsafe extern fn MmChangeImageProtection(_arg0: QWORD, _arg1: QWORD, _arg2: QWORD, _arg3: QWORD) -> winapi::ctypes::__int64 {
     println!("MmChangeImageProtection");
     minwindef::TRUE as _
 }
 
-pub unsafe extern "stdcall" fn IoAllocateMdl(virtual_address: ntdef::PVOID, length: ntdef::ULONG, _secondary_buffer: ntdef::BOOLEAN, _charge_quota: ntdef::BOOLEAN, irp: ntdef::PVOID) -> *mut MDL {
-    print!("IoAllocateMdl (VA @ 0x{:X})    ", virtual_address as usize);
+#[abi("system")]
+pub unsafe extern fn IoAllocateMdl(virtual_address: ntdef::PVOID, length: ntdef::ULONG, _secondary_buffer: ntdef::BOOLEAN, _charge_quota: ntdef::BOOLEAN, irp: ntdef::PVOID) -> *mut MDL {
+    print!("IoAllocateMdl (VA @ {:#X})    ", virtual_address as usize);
     if !irp.is_null() {
         panic!("Non-null IRP found! Non-null IRPs are unsupported.");
     }
@@ -39,7 +41,7 @@ pub unsafe extern "stdcall" fn IoAllocateMdl(virtual_address: ntdef::PVOID, leng
     let mapped_virtual_address = VirtualProtectEx(process_handle, virtual_address, length as usize, PAGE_READWRITE, &mut old_protect);
     if mapped_virtual_address == minwindef::FALSE {
         let error = GetLastError();
-        panic!("Failed to allocate memory @ 0x{:X}\nError Code: 0x{error:X}\nProcess Handle: 0x{:X}", virtual_address as usize, process_handle as isize);
+        panic!("Failed to allocate memory @ {:#X}\nError Code: {error:#X}\nProcess Handle: {:#X}", virtual_address as usize, process_handle as isize);
     }
 
     // Initialize Memory Descriptor List
@@ -56,12 +58,13 @@ pub unsafe extern "stdcall" fn IoAllocateMdl(virtual_address: ntdef::PVOID, leng
 
     MDL_LIST.with_borrow_mut(|list| list.push_back(mdl));
     let mdl_ptr = MDL_LIST.with_borrow_mut(|list| list.back_mut().unwrap() as *mut _);
-    println!("Allocated MDL (MDL @ 0x{:X})", mdl_ptr as *const _ as usize);
+    println!("Allocated MDL (MDL @ {:#X})", mdl_ptr as *const _ as usize);
     mdl_ptr as *mut MDL
 }
 
-pub unsafe extern "stdcall" fn IoFreeMdl(mdl: *mut MDL) {
-    println!("IoFreeMdl (MDL @ 0x{:X})", mdl as usize);
+#[abi("system")]
+pub unsafe extern fn IoFreeMdl(mdl: *mut MDL) {
+    println!("IoFreeMdl (MDL @ {:#X})", mdl as usize);
     assert!(!mdl.is_null());
 
     // Gather and send decrypted page to the main thread
@@ -77,27 +80,32 @@ pub unsafe extern "stdcall" fn IoFreeMdl(mdl: *mut MDL) {
     MDL_LIST.with_borrow_mut(|list| list.remove(list.iter().position(|x| x as *const _ == mdl).unwrap()));
 }
 
-pub unsafe extern "stdcall" fn MmProbeAndLockPages(memory_descriptor_list: *mut MDL, _access_mode: KPROCESSOR_MODE, _operation: LOCK_OPERATION) {
-    println!("MmProbeAndLockPages (MDL @ {:X})", memory_descriptor_list as usize);
+#[abi("system")]
+pub unsafe extern fn MmProbeAndLockPages(memory_descriptor_list: *mut MDL, _access_mode: KPROCESSOR_MODE, _operation: LOCK_OPERATION) {
+    println!("MmProbeAndLockPages (MDL @ {:#X})", memory_descriptor_list as usize);
 }
 
-pub unsafe extern "stdcall" fn MmUnlockPages(memory_descriptor_list: *mut MDL) {
-    print!("MmUnlockPages (MDL @ 0x{:X})    ", memory_descriptor_list as usize);
-    print!("MDL Flags Before 0x{:X}    ", (*memory_descriptor_list).mdl_flags);
+#[abi("system")]
+pub unsafe extern fn MmUnlockPages(memory_descriptor_list: *mut MDL) {
+    print!("MmUnlockPages (MDL @ {:#X})    ", memory_descriptor_list as usize);
+    print!("MDL Flags Before {:#X}    ", (*memory_descriptor_list).mdl_flags);
     (*memory_descriptor_list).mdl_flags = 0;
-    println!("MDL Flags After 0x{:X}", (*memory_descriptor_list).mdl_flags);
+    println!("MDL Flags After {:#X}", (*memory_descriptor_list).mdl_flags);
 }
 
-pub unsafe extern "stdcall" fn MmLockPagableDataSection(address_within_section: ntdef::PVOID) -> ntdef::PVOID {
-    println!("MmLockPagableDataSection (0x{:X})", address_within_section as usize);
+#[abi("system")]
+pub unsafe extern fn MmLockPagableDataSection(address_within_section: ntdef::PVOID) -> ntdef::PVOID {
+    println!("MmLockPagableDataSection ({:#X})", address_within_section as usize);
     address_within_section
 }
 
-pub unsafe extern "stdcall" fn MmMapLockedPagesSpecifyCache(_memory_descriptor_list: *mut MDL, _access_mode: KPROCESSOR_MODE, _cache_type: MEMORY_CACHING_TYPE) -> ntdef::PVOID {
+#[abi("system")]
+pub unsafe extern fn MmMapLockedPagesSpecifyCache(_memory_descriptor_list: *mut MDL, _access_mode: KPROCESSOR_MODE, _cache_type: MEMORY_CACHING_TYPE) -> ntdef::PVOID {
     println!("MmMapLockedPagesSpecifyCache");
     0x0 as _
 }
 
-pub unsafe extern "stdcall" fn MmUnmapLockedPages(_base_address: ntdef::PVOID, _memory_descriptor_list: *mut MDL) {
+#[abi("system")]
+pub unsafe extern fn MmUnmapLockedPages(_base_address: ntdef::PVOID, _memory_descriptor_list: *mut MDL) {
     println!("MmUnmapLockedPages");
 }
