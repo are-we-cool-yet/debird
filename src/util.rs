@@ -2,50 +2,25 @@
 
 use std::collections::HashMap;
 
-use pelite::pe64::{Pe, PeFile, Va, imports::Import};
+use winapi::um::winnt::PIMAGE_THUNK_DATA;
 
-use crate::error;
 
+#[derive(Clone)]
 pub struct Imports<'a> {
-    import_map: HashMap<&'a str, (String, Va)>,
-    image_base: usize,
+    import_map: HashMap<&'a str, PIMAGE_THUNK_DATA>,
 }
 
 impl<'a> Imports<'a> {
-    pub fn from_pe_file(pe_file: &'a PeFile<'a>) -> error::Result<Self> {
-        let imports = pe_file.imports()?.into_iter();
-        let mut import_map = HashMap::with_capacity(imports.len());
-        for import_dll in imports {
-            let dll_name = import_dll.dll_name()?.to_string();
-            for (&import_va, import_name) in Iterator::zip(import_dll.iat()?, import_dll.int()?) {
-                if let Import::ByName { hint: _hint, name } = import_name? {
-                    import_map.insert(name.to_str()?, (dll_name.clone(), import_va));
-                }
-            }
-        }
-
-        Ok(Self {
-            import_map,
-            image_base: pe_file.optional_header().ImageBase as usize,
-        })
+    pub fn new(import_map: HashMap<&'a str, PIMAGE_THUNK_DATA>) -> Self {
+        Self { import_map }
     }
 
-    pub fn iter(&'_ self) -> std::collections::hash_map::Iter<'_, &'a str, (String, Va)> {
-        self.import_map.iter()
+    pub fn get(&self, name: &str) -> Option<PIMAGE_THUNK_DATA> {
+        self.import_map.get(name).copied()
     }
 
-    pub fn get(&self, name: &str) -> Option<Va> {
-        self.import_map.get(name).map(|(_, b)| b).copied()
-    }
-
-    /// # Safety
-    /// The caller assumes the safety responsibilities of [`offset_addr`].
-    pub unsafe fn find_fn<T>(&self, name: &str, offset: isize) -> error::Result<*mut T> {
-        if let Some(ptr) = self.get(name) {
-            Ok(offset_addr(ptr as usize, self.image_base, offset))
-        } else {
-            Err(error::Error::HookImportNotFound(error::ImportNotFound(name.to_string())))
-        }
+    pub fn import_map(&self) -> &HashMap<&'a str, PIMAGE_THUNK_DATA> {
+        &self.import_map
     }
 }
 
@@ -58,15 +33,15 @@ pub const fn from_base(addr: usize, base: usize) -> usize {
 /// given pointer by the given offset is not used to break aliasing
 /// rules or other borrowing rules and that the resulting address is valid
 /// and can be cast to the specified type.
-pub const unsafe fn offset_addr<T>(ptr: usize, base: usize, offset: isize) -> *mut T {
-    (from_base(ptr, base) as *mut T).byte_offset(offset)
+pub const unsafe fn offset_addr<T>(ptr: usize, offset: isize) -> *mut T {
+    unsafe { (ptr as *mut T).byte_offset(offset) }
 }
 
 /// A macro that creates hooks.
 #[macro_export]
 macro_rules! create_hooks {
-    { ($handle:ident, $imports:ident): $( $i:ident; )+ } => {
-        $( minhook::MinHook::create_hook(*$crate::util::Imports::find_fn(&$imports, stringify!($i), $handle)?, $crate::hook::$i as _)? );+
+    { $hooks:ident: $( $i:ident; )+ } => {
+        $( $crate::hook::Hooks::hook(&mut $hooks, stringify!($i), $crate::hook::$i as *mut ::core::ffi::c_void)? );+
     };
 }
 

@@ -3,12 +3,12 @@
 
 use std::{cell::RefCell, ffi, ops::Deref, path::{Path, PathBuf}, str::FromStr, sync::{LazyLock, mpsc}, thread::{self}, time::Duration};
 use error::Error;
-use minhook::MinHook;
 use pelite::FileMap;
 use pelite::pe64::*;
 use pretty_hex::config_hex;
+use winapi::shared::minwindef::HMODULE;
 
-use crate::{target::TargetDriver, util::{Imports, from_base}};
+use crate::{hook::Hooks, target::TargetDriver, util::from_base};
 
 pub mod constants;
 pub mod error;
@@ -18,10 +18,9 @@ pub mod types;
 pub mod target;
 pub mod analyze;
 pub mod patch;
-pub mod smuggle;
 
 thread_local! {
-    pub static DECRYPT_RX: RefCell<Option<mpsc::Receiver<types::DecryptMessage>>> = RefCell::new(None);
+    pub static DECRYPT_RX: RefCell<Option<mpsc::Receiver<types::DecryptMessage>>> = const { RefCell::new(None) };
 }
 
 pub static DECRYPT_TX: LazyLock<mpsc::SyncSender<types::DecryptMessage>> = LazyLock::new(|| {
@@ -70,22 +69,16 @@ debird <path-to-driver>");
     };
     println!("Analyzed: {analysis:?}");
 
-    let imports = Imports::from_pe_file(&pe_file)?;
-    println!("Generating Fake Exports");
-    smuggle::smuggle(lib_path.parent().unwrap(), &imports)?;
-
     // Now emulate the driver to decrypt and extract the code
     println!("Emulating {}", lib_name);
 
     unsafe {
-        println!("a");
-        println!("{:?}", &analysis.patched_path);
-        let lib = libloading::os::windows::Library::load_with_flags(&analysis.patched_path, libloading::os::windows::LOAD_LIBRARY_SEARCH_DLL_LOAD_DIR)?;
-        println!("b");
+        let lib = libloading::os::windows::Library::load_with_flags(&analysis.patched_path, constants::DONT_RESOLVE_DLL_REFERENCES)?;
         let handle = lib.into_raw();
+        let mut hooks = Hooks::new(handle as HMODULE)?;
 
         // hook ntoskrnl functions
-        create_hooks! { (handle, imports):
+        create_hooks! { hooks:
             MmChangeImageProtection;
             IoAllocateMdl;
             IoFreeMdl;
@@ -95,15 +88,14 @@ debird <path-to-driver>");
             MmMapLockedPagesSpecifyCache;
             MmUnmapLockedPages;
         };
-
-        MinHook::enable_all_hooks()?;
+        hooks.hook_unused_as_dummies()?;
 
         let _ = DECRYPT_TX.deref();
 
         let thread_handle = thread::spawn(move || {
             // Call decryption functions
             for &(const_data, rw_data, decrypt_fn_addr, data_id) in constants::DATA.iter() {
-                println!("{data_id}");
+                println!("Data ID: {data_id:#X}");
                 hook::DATA_ID.set(data_id);
                 hook::CHUNK_ID.set(0);
                 let rw_data_ptr = (from_base(rw_data, image_base) as *mut ffi::c_void).byte_offset(handle);
@@ -154,10 +146,6 @@ debird <path-to-driver>");
                 std::fs::write(data_file_path, data)?;
                 Ok(())
             })?;
-
-        // uninitialize hooks
-        MinHook::disable_all_hooks()?;
-        MinHook::uninitialize();
 
         // unload library
         let lib = libloading::os::windows::Library::from_raw(handle);

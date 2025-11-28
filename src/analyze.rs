@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 
 use pelite::pe64::*;
 
-use crate::{error, hook, patch::Patcher};
+use crate::{error, patch::Patcher};
 
 #[derive(Debug)]
 pub struct Analysis {
@@ -10,13 +10,7 @@ pub struct Analysis {
 }
 
 pub fn clipsp(lib_path: &Path, pe_file: PeFile) -> error::Result<Analysis> {
-    let mut patcher = Patcher::new(lib_path, &pe_file);
-
-    // The contents of the true `DriverEntry` function.
-    // For whatever reason, CLIPSP.SYS has more than one `DriverEntry` function,
-    // and this one is called upon attempting to load it. We want it to return
-    // successfully.
-    patcher.patch("B8 01 00 00 C0 C3", hook::CANCEL_DRIVER_ENTRY)?;
+    let patcher = Patcher::new(lib_path, &pe_file);
 
     // Set 0x2000 File is DLL
     // TODO: move this elsewhere since we don't need it for CLIPSP but might for something else in the future
@@ -37,6 +31,7 @@ pub fn clipsp(lib_path: &Path, pe_file: PeFile) -> error::Result<Analysis> {
     // })?;
 
     // Extract read-write/const data and location of decryption functions
+    // TODO: read ^
 
     Ok(Analysis {
         patched_path: patcher.patch_driver()?
